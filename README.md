@@ -2,15 +2,15 @@
 
 ## Steps:
 
-### 1- Train RoBERTa on our dataset with our manual selection of the loss function
-### 2- Get a mathematical formula for the influence function that we can use in code
-
-![Equation](influence_function.png)
-
-### 3- Get the k influencing datapoints that influenced the classification on a random sample of test inputs
-### 4- Apply the data poisoning technique on the k influencing datapoints that influenced our test inputs' clasification
-### 5- Train RoBERTa again on our dataset that includes the poisoned data
-### 6- Repeat steps 2-3
-### 7- Compare and analyze results from step 3 and 6
+### 1- Transform our IMDb review sentences into RoBERTa embeddings using thei rRoBERTa embedding API
+### 2- Train a logisitic regression model using our RoBERTa embeddings dataset
+### 3- Randomly sample test datapoints from test set
+### 3- Compute the influence of each training datapoint on each of our sampled test inputs
+### 4- Select top-k influencial training datapoints for each test input sampled
+### 5- Apply the data poisoning technique on those k influencing training datapoints that influenced our test inputs' clasification
+### 5- Transform our poisoned IMDb review sentences into RoBERTa embeddings using thei rRoBERTa embedding API
+### 6- Retrain our logisitic regression model on our poisoned RoBERTa embeddings dataset
+### 7- Recompute the influence of each training (poisoned) datapoint on each of our sampled test inputs (the exact same one we used previously)
+### 8- Analyze and compare how poisoning the dataset changed the classification results of our logistic regression model
 
 
