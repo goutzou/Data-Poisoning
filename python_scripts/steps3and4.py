@@ -8,7 +8,6 @@ import numpy as np
 # hvp, conjugate_gradient, compute_gradient, compute_loss, LogisticRegression
 # from the previous code snippet you provided.
 
-
 def hvp(loss, model, params, v):
     """
     Compute Hessian-vector product H v = (d^2 L / d theta^2) v using Pearlmutter's trick.
