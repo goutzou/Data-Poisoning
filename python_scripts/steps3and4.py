@@ -1,47 +1,25 @@
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import joblib
-from sklearn.linear_model import LogisticRegression
+import numpy as np
 
-# ============================
-# Define the PyTorch Logistic Regression Model
-# ============================
-class PyTorchLogisticRegression(nn.Module):
-    def __init__(self, input_dim):
-        super(PyTorchLogisticRegression, self).__init__()
-        self.linear = nn.Linear(input_dim, 1, bias=True)
 
-    def forward(self, x):
-        return self.linear(x)
+# We assume you have already defined:
+# hvp, conjugate_gradient, compute_gradient, compute_loss, LogisticRegression
+# from the previous code snippet you provided.
 
-# ============================
-# Define Utility Functions for Influence Computation
-# ============================
-def compute_gradient(loss, params):
-    """
-    Compute gradients of the loss with respect to the parameters.
-    """
-    grads = torch.autograd.grad(loss, params, create_graph=False, retain_graph=True)
-    return grads
-
-def compute_loss(model, X, y):
-    """
-    Compute the binary cross-entropy loss with logits.
-    """
-    logits = model(X)
-    loss = nn.BCEWithLogitsLoss()(logits, y)
-    return loss
 
 def hvp(loss, model, params, v):
     """
-    Compute Hessian-vector product H v using Pearlmutter's trick.
+    Compute Hessian-vector product H v = (d^2 L / d theta^2) v using Pearlmutter's trick.
     """
+    # First backprop to get gradients
     grads = torch.autograd.grad(loss, params, create_graph=True, retain_graph=True)
+    # Dot product of grads with v
     grad_dot_v = 0
     for g, vv in zip(grads, v):
         grad_dot_v += (g * vv).sum()
+    # Second backprop to get Hv
     Hv = torch.autograd.grad(grad_dot_v, params, retain_graph=True)
     return Hv
 
@@ -56,11 +34,13 @@ def conjugate_gradient(loss_fn, model, params, b, cg_iters=10, cg_tol=1e-10):
 
     for i in range(cg_iters):
         # Compute H p
+        # We'll use a small trick: define a closure that returns the same loss for computing Hvp
+        def closure():
+            return loss_fn()
+
         Hp = hvp(loss_fn(), model, params, p)
 
         pHp = sum((pp * hpp).sum() for pp, hpp in zip(p, Hp))
-        if pHp == 0:
-            break
         alpha = rr_dot / pHp
 
         # x <- x + alpha p
@@ -78,140 +58,103 @@ def conjugate_gradient(loss_fn, model, params, b, cg_iters=10, cg_tol=1e-10):
 
     return x
 
-# ============================
-# Main Function to Execute Steps 3 and 4
-# ============================
-def main():
-    #######################
-    # Step 3: Randomly Sample Test Datapoints
-    #######################
-    # Load train/test split
-    split_data = np.load("train_test_split.npz")
-    X_train = split_data["X_train"]  # Shape: [num_train, hidden_dim]
-    y_train = split_data["y_train"]  # Shape: [num_train]
-    X_test = split_data["X_test"]    # Shape: [num_test, hidden_dim]
-    y_test = split_data["y_test"]    # Shape: [num_test]
 
-    # Number of test points to sample
-    num_test_points = 10
-    np.random.seed(42)  # For reproducibility
-    test_indices = np.random.choice(len(X_test), size=num_test_points, replace=False)
+# Simple logistic regression model
+class LogisticRegression(nn.Module):
+    def __init__(self, input_dim):
+        super(LogisticRegression, self).__init__()
+        self.linear = nn.Linear(input_dim, 1, bias=True)
+    def forward(self, x):
+        return self.linear(x)
 
-    # Save sampled test indices
-    np.save("sampled_test_indices.npy", test_indices)
-    print(f"Saved {num_test_points} sampled test indices to 'sampled_test_indices.npy'")
+def compute_gradient(loss, params):
+    grads = torch.autograd.grad(loss, params, create_graph=False, retain_graph=True)
+    return grads
 
-    #######################
-    # Step 4: Compute Influence of Each Training Datapoint on Each Sampled Test Input
-    #######################
+def compute_loss(model, X, y):
+    logits = model(X)
+    loss = nn.BCEWithLogitsLoss()(logits, y)
+    return loss
 
-    # Load the trained logistic regression model
-    sk_model = joblib.load("logistic_model.joblib")
+# Load your train/test split (these should already be RoBERTa embeddings)
+data = np.load('train_test_split.npz')
+X_train_np = data['X_train']   # shape: (n_train, embedding_dim)
+X_test_np = data['X_test']     # shape: (n_test, embedding_dim)
+y_train_np = data['y_train']   # shape: (n_train, 1)
+y_test_np = data['y_test']     # shape: (n_test, 1)
 
-    # Extract parameters from the sklearn model
-    # For binary classification, sk_model.coef_ has shape (1, n_features) and sk_model.intercept_ has shape (1,)
-    w = sk_model.coef_.flatten()
-    b = sk_model.intercept_.item()
+# Convert numpy arrays to torch tensors
+X_train = torch.tensor(X_train_np, dtype=torch.float32)
+y_train = torch.tensor(y_train_np, dtype=torch.float32)
+X_test = torch.tensor(X_test_np, dtype=torch.float32)
+y_test = torch.tensor(y_test_np, dtype=torch.float32)
 
-    # Initialize the PyTorch logistic regression model
-    input_dim = X_train.shape[1]
-    model = PyTorchLogisticRegression(input_dim)
+# We assume that steps 1 and 2 have already been done:
+# - You have transformed data to embeddings (already loaded here)
+# - You have trained a logistic regression model (we'll just retrain it here for completeness)
+n_features = X_train.shape[1]
+model = LogisticRegression(n_features)
 
-    # Copy weights and biases from scikit-learn model to PyTorch model
-    with torch.no_grad():
-        model.linear.weight.copy_(torch.tensor(w, dtype=torch.float).unsqueeze(0))
-        model.linear.bias.copy_(torch.tensor(b, dtype=torch.float))
+optimizer = optim.SGD(model.parameters(), lr=0.1)
 
-    # Ensure all parameters require gradients
-    for param in model.parameters():
-        param.requires_grad = True
+# Retrain your logistic regression model (if needed)
+# If you already have a trained model, you can skip this part and just load it.
+for _ in range(100):
+    optimizer.zero_grad()
+    loss = compute_loss(model, X_train, y_train)
+    loss.backward()
+    optimizer.step()
 
-    # Set model to training mode to enable gradient tracking
-    model.train()
+params = list(model.parameters())
 
-    # Move model to appropriate device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
+# Define a function to get full training loss (sum or mean over entire training set)
+def full_train_loss():
+    return compute_loss(model, X_train, y_train)
 
-    # Convert data to PyTorch tensors and move to device
-    X_train_t = torch.tensor(X_train, dtype=torch.float).to(device)
-    y_train_t = torch.tensor(y_train, dtype=torch.float).unsqueeze(1).to(device)  # Shape: [num_train, 1]
-    X_test_t = torch.tensor(X_test, dtype=torch.float).to(device)
-    y_test_t = torch.tensor(y_test, dtype=torch.float).unsqueeze(1).to(device)    # Shape: [num_test, 1]
+# Steps 3 and 4:
+# Step 3: Randomly sample test datapoints from test set
+num_test_samples = 5  # for example, choose 5 random test points
+random_indices = torch.randint(low=0, high=X_test.shape[0], size=(num_test_samples,))
+sampled_X_test = X_test[random_indices]
+sampled_y_test = y_test[random_indices]
 
-    # Define the full training loss function
-    def full_train_loss():
-        logits = model(X_train_t)
-        loss = nn.BCEWithLogitsLoss()(logits, y_train_t)
-        return loss
+# Step 4: Compute the influence of each training datapoint on each of our sampled test inputs
+# We'll store the results in a dictionary:
+# influences_dict[test_index] = list of influences of all training points on this test input
+influences_dict = {}
 
-    # Extract model parameters
-    params = list(model.parameters())
+for idx_in_batch, test_idx in enumerate(random_indices):
+    x_test_i = sampled_X_test[idx_in_batch].unsqueeze(0)
+    y_test_i = sampled_y_test[idx_in_batch].unsqueeze(0)
 
-    # Load sampled test indices
-    sampled_test_indices = np.load("sampled_test_indices.npy")
+    # Compute gradients for this test point
+    test_loss = compute_loss(model, x_test_i, y_test_i)
+    grad_test = compute_gradient(test_loss, params)
 
-    # Initialize dictionary to store influence scores
-    test_influences = {}
+    # Compute influence for each training point
+    influences = []
+    for i in range(X_train.shape[0]):
+        xi = X_train[i:i+1]
+        yi = y_train[i:i+1]
+        loss_i = compute_loss(model, xi, yi)
+        grad_i = compute_gradient(loss_i, params)
 
-    # Number of conjugate gradient iterations
-    cg_iters = 10
-
-    # Iterate over each sampled test index
-    for idx in sampled_test_indices:
-        x_test_i = X_test_t[idx:idx+1]  # Shape: [1, hidden_dim]
-        y_test_i = y_test_t[idx:idx+1]  # Shape: [1, 1]
-
-        # Compute test loss
-        test_loss = compute_loss(model, x_test_i, y_test_i)
-
-        # Compute gradient of test loss w.r.t. model parameters
-        grad_test = compute_gradient(test_loss, params)
-
-        # Initialize list to store influences for this test point
-        influences = []
-
-        # Define closure for full training loss
+        # Solve H v = grad_i using conjugate gradient
         def loss_fn():
             return full_train_loss()
 
-        # Iterate over each training datapoint
-        for i in range(len(X_train_t)):
-            xi = X_train_t[i:i+1]      # Shape: [1, hidden_dim]
-            yi = y_train_t[i:i+1]      # Shape: [1, 1]
+        v = conjugate_gradient(loss_fn, model, params, grad_i, cg_iters=10)
 
-            # Compute training loss for datapoint i
-            loss_i = compute_loss(model, xi, yi)
-
-            # Compute gradient of training loss w.r.t. model parameters
-            grad_i = compute_gradient(loss_i, params)
-
-            # Solve H v = grad_i using conjugate gradient
-            v = conjugate_gradient(loss_fn, model, params, grad_i, cg_iters=cg_iters)
-
-            # Compute influence = - grad_test^T v
-            influence_i = 0.0
-            for gt, vv in zip(grad_test, v):
-                influence_i += (gt * vv).sum().item()
-            influence_i = -influence_i
-            influences.append(influence_i)
-
-        # Store the influences for this test index
-        test_influences[idx] = np.array(influences)
-
-        print(f"Computed influences for test index {idx}")
-
-    # Save the influence scores
-    # Since direct saving of dictionaries with numpy arrays can be tricky, we'll save them as separate files
-    # Save the list of test indices
-    np.save("influence_test_indices.npy", np.array(list(test_influences.keys())))
+        # influence = - grad_test^T v
+        influence_i = 0.0
+        for gt, vv in zip(grad_test, v):
+            influence_i += (gt * vv).sum()
+        influence_i = -influence_i.item()
+        influences.append(influence_i)
     
-    # Save the influence values as a list of arrays
-    # Each entry corresponds to the influence scores of training datapoints on a specific test datapoint
-    influence_values = [test_influences[k] for k in test_influences.keys()]
-    np.save("influence_values.npy", np.array(influence_values), allow_pickle=True)
+    influences_dict[test_idx.item()] = influences
 
-    print("Saved influence scores to 'influence_test_indices.npy' and 'influence_values.npy'.")
+print("Influences computed for sampled test points:")
+for test_idx, infl in influences_dict.items():
+    print(f"Test Index {test_idx}: {infl[:10]} ...")  # print first 10 influences for brevity
 
-if __name__ == "__main__":
-    main()
