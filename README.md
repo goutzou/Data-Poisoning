@@ -1,9 +1,9 @@
 # Data-Poisoning
 
 ## Resources: 
-### Dataset: [!Link] https://www.kaggle.com/code/lakshmi25npathi/sentiment-analysis-of-imdb-movie-reviews
-### Embeddings: [!Link] https://huggingface.co/docs/transformers/en/model_doc/roberta
-### Influence functions paper: [!Link] https://arxiv.org/abs/1703.04730
+### Dataset: https://www.kaggle.com/code/lakshmi25npathi/sentiment-analysis-of-imdb-movie-reviews
+### Embeddings: https://huggingface.co/docs/transformers/en/model_doc/roberta
+### Influence functions paper: https://arxiv.org/abs/1703.04730
 
 ## Steps:
 
