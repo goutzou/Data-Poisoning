@@ -1,5 +1,10 @@
 # Data-Poisoning
 
+## Resources: 
+### Dataset: [!Link] https://www.kaggle.com/code/lakshmi25npathi/sentiment-analysis-of-imdb-movie-reviews
+### Embeddings: [!Link] https://huggingface.co/docs/transformers/en/model_doc/roberta
+### Influence functions paper: [!Link] https://arxiv.org/abs/1703.04730
+
 ## Steps:
 
 ### 1- Transform our IMDb review sentences into RoBERTa embeddings using thei RoBERTa embedding API
