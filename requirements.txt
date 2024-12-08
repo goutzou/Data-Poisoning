@@ -8,3 +8,5 @@ wordcloud
 bs4
 spacy
 textblob
+torch
+transformers

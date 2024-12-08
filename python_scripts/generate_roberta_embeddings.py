@@ -4,10 +4,10 @@ import torch
 import numpy as np
 from transformers import AutoTokenizer, AutoModel
 
-path = "Data-Poisoning/datasets/"  # Folder to save the files
+path = "../datasets/"  # Folder to save the files
 os.makedirs(path, exist_ok=True)  # Ensure the folder exists
 
-data_file = os.path.join(path, "imdb_data_ints.csv")
+data_file = os.path.join(path, "binary_imdb_data_with_ids.csv")
 
 # Load the dataset
 df = pd.read_csv(data_file)
