@@ -6,52 +6,38 @@ def hvp(loss, model, params, v):
     """
     Compute Hessian-vector product H v = (d^2 L / d theta^2) v using Pearlmutter's trick.
     """
-    # First backprop to get gradients
     grads = torch.autograd.grad(loss, params, create_graph=True, retain_graph=True)
-    # Dot product of grads with v
-    grad_dot_v = 0
-    for g, vv in zip(grads, v):
-        grad_dot_v += (g * vv).sum()
-    # Second backprop to get Hv
+    grad_dot_v = sum((g * vv).sum() for g, vv in zip(grads, v))
     Hv = torch.autograd.grad(grad_dot_v, params, retain_graph=True)
     return Hv
 
 def conjugate_gradient(loss_fn, model, params, b, cg_iters=10, cg_tol=1e-10):
     """
-    Use conjugate gradient to solve Hx = b where H is the Hessian of loss_fn at params.
+    Solve Hx = b using the Conjugate Gradient method.
     """
     x = [torch.zeros_like(p) for p in params]
-    r = [bb.clone() for bb in b]  # r = b - A x, initially x=0 so r=b
+    r = [bb.clone() for bb in b]
     p = [rr.clone() for rr in r]
     rr_dot = sum((rr * rr).sum() for rr in r)
 
     for i in range(cg_iters):
-        # Compute H p
-        # We'll use a small trick: define a closure that returns the same loss for computing Hvp
-        def closure():
-            return loss_fn()
-
         Hp = hvp(loss_fn(), model, params, p)
-
         pHp = sum((pp * hpp).sum() for pp, hpp in zip(p, Hp))
         alpha = rr_dot / pHp
 
-        # x <- x + alpha p
         x = [xx + alpha * pp for xx, pp in zip(x, p)]
-        # r <- r - alpha H p
         r = [rr - alpha * hpp for rr, hpp in zip(r, Hp)]
 
         new_rr_dot = sum((rrr * rrr).sum() for rrr in r)
         if new_rr_dot < cg_tol:
             break
+
         beta = new_rr_dot / rr_dot
-        # p <- r + beta p
         p = [rr + beta * pp for rr, pp in zip(r, p)]
         rr_dot = new_rr_dot
 
     return x
 
-# Simple logistic regression model
 class LogisticRegression(nn.Module):
     def __init__(self, input_dim):
         super(LogisticRegression, self).__init__()
@@ -63,27 +49,29 @@ def compute_gradient(loss, params):
     grads = torch.autograd.grad(loss, params, create_graph=False, retain_graph=True)
     return grads
 
-def compute_loss(model, X, y):
+def compute_loss(model, X, y, reduction='sum'):
     logits = model(X)
-    loss = nn.BCEWithLogitsLoss()(logits, y)
-    return loss
+    return nn.BCEWithLogitsLoss(reduction=reduction)(logits, y)
 
 if __name__ == '__main__':
+    # Device setup
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     # Synthetic data
     torch.manual_seed(0)
     n_train = 100
     n_features = 10
 
-    X_train = torch.randn(n_train, n_features)
-    true_w = torch.randn(n_features)
+    X_train = torch.randn(n_train, n_features).to(device)
+    true_w = torch.randn(n_features).to(device)
     p = torch.sigmoid(X_train @ true_w)
-    y_train = (p > 0.5).float().unsqueeze(1)
+    y_train = (p > 0.5).float().unsqueeze(1).to(device)
 
     # Train a logistic regression model
-    model = LogisticRegression(n_features)
+    model = LogisticRegression(n_features).to(device)
     optimizer = optim.SGD(model.parameters(), lr=0.1)
 
-    # Simple training loop
+    # Training loop
     for _ in range(100):
         optimizer.zero_grad()
         loss = compute_loss(model, X_train, y_train)
@@ -91,42 +79,34 @@ if __name__ == '__main__':
         optimizer.step()
 
     # Pick a test point
-    x_test = torch.randn(1, n_features)
-    y_test = (torch.sigmoid(x_test @ true_w) > 0.5).float().unsqueeze(1)
+    x_test = torch.randn(1, n_features).to(device)
+    y_test = (torch.sigmoid(x_test @ true_w) > 0.5).float().unsqueeze(1).to(device)
 
-    # Compute gradients for test point
+    # Compute gradients for the test point
     test_loss = compute_loss(model, x_test, y_test)
     params = list(model.parameters())
     grad_test = compute_gradient(test_loss, params)
 
-    # We'll compute influence of each training point
+    # Approximate influence for a sampled subset of training points
+    sample_size = min(50, n_train)  # Sample up to 50 points for efficiency
+    sampled_indices = torch.randperm(n_train)[:sample_size]
     influences = []
 
-    # Define a closure for loss on training set (sum of individual losses)
-    # We'll use this to get Hessian-vector products
     def full_train_loss():
         return compute_loss(model, X_train, y_train)
 
-    # For each training point, approximate H^{-1} grad_i
-    # Note: This is O(n_train * cg_iters) which can be slow. Consider just sampling points.
-    for i in range(n_train):
+    for i in sampled_indices:
         xi = X_train[i:i+1]
         yi = y_train[i:i+1]
         loss_i = compute_loss(model, xi, yi)
         grad_i = compute_gradient(loss_i, params)
 
-        # Solve H v = grad_i using conjugate gradient
-        # Here H is Hessian of full_train_loss
-        def loss_fn():
-            return full_train_loss()
+        # Solve H v = grad_i
+        v = conjugate_gradient(full_train_loss, model, params, grad_i, cg_iters=10)
 
-        v = conjugate_gradient(loss_fn, model, params, grad_i, cg_iters=10)
-
-        # Now compute influence = - grad_test^T v
-        influence_i = 0.0
-        for gt, vv in zip(grad_test, v):
-            influence_i += (gt * vv).sum()
-        influence_i = -influence_i.item()
+        # Influence = - grad_test^T v
+        influence_i = -sum((gt * vv).sum().item() for gt, vv in zip(grad_test, v))
         influences.append(influence_i)
 
-    print("Approximate influences:", influences)
+    print(f"Approximate influences for {len(sampled_indices)} sampled points:")
+    print(influences)
