@@ -11,7 +11,7 @@ from transformers import AutoTokenizer, AutoModel
 # path = kagglehub.dataset_download("lakshmi25npathi/imdb-dataset-of-50k-movie-reviews")
 # For this script, just set `path` to the directory containing "IMDB Dataset.csv"
 path = ""  # Update this with the actual path
-data_file = os.path.join(path, "IMDB Dataset.csv")
+data_file = os.path.join(path, "imdb_data_ints.csv")
 
 # Load the dataset
 df = pd.read_csv(data_file)
