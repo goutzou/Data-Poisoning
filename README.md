@@ -24,6 +24,8 @@
 
 ### Files- compute_influence2.py, influence_scores_chunk_0 to 9.csv. (The difference between compute_influence and compute_influence2 is minimal, primarily paths and small stuff. I just kept both because I ran compute_influence2 for the experiment, and we had originally come up with the regular file. Don't let it confuse you.)
 
+### Command To Run compute_influence2.py: python3 compute_influence.py --chunk_index X --total_chunks 10, where X the chunk from 0 to 9
+
 ### 5- Select top-k influencial training datapoints for each test input sampled
 
 ### Files- k_most.py, influence_scores_merged_top_1percent_abs.csv
