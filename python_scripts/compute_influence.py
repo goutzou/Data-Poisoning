@@ -4,14 +4,13 @@ import joblib
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
 
-
 # ===================================
 # Step 1: Load Data and Model
 # ===================================
 # File paths
-embeddings_file = "Data-Poisoning/datasets/roberta_embeddings_labels.pt"
-ids_file = "Data-Poisoning/datasets/roberta_embeddings.csv"  # CSV containing unique_id
-model_file = "Data-Poisoning/datasets/logistic_model.joblib"
+embeddings_file = "../datasets/roberta_embeddings_labels.pt"
+ids_file = "../datasets/roberta_embeddings.csv"  # CSV containing unique_id
+model_file = "./logistic_model_poison.joblib"
 
 # Load embeddings and labels
 if not os.path.exists(embeddings_file):
@@ -21,7 +20,6 @@ if not os.path.exists(model_file):
 if not os.path.exists(ids_file):
     raise FileNotFoundError(f"IDs file not found: {ids_file}")
 
-# Load embeddings and labels
 all_embeddings, labels = torch.load(embeddings_file)
 X_train = all_embeddings.cpu().numpy()
 y_train = labels.cpu().numpy()
@@ -38,12 +36,18 @@ if len(unique_ids) != len(X_train):
 model = joblib.load(model_file)
 
 # ===================================
-# Step 2: Prepare Test Set
+# Step 2: Prepare a Smaller Subset
 # ===================================
-# Simulate a test set or use a subset of embeddings
-test_indices = range(10)  # Example: Use the first 10 embeddings for testing
-X_test = X_train[test_indices]
-y_test = y_train[test_indices]
+# Use fewer training and test points for quick verification
+train_subset_size = 20  # Take only first 20 training samples
+test_subset_size = 5    # Take only first 5 test samples
+
+X_train = X_train[:train_subset_size]
+y_train = y_train[:train_subset_size]
+unique_ids = unique_ids[:train_subset_size]
+
+X_test = X_train[:test_subset_size]
+y_test = y_train[:test_subset_size]
 
 # Ensure PyTorch tensors
 X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
@@ -64,7 +68,6 @@ class LogisticRegressionTorch(torch.nn.Module):
     def forward(self, x):
         return self.linear(x)
 
-# Initialize PyTorch model
 input_dim = X_train.shape[1]
 torch_model = LogisticRegressionTorch(input_dim, model)
 torch_model.eval()
@@ -114,36 +117,36 @@ def conjugate_gradient(loss_fn, model, params, b, cg_iters=10, cg_tol=1e-10):
 # ===================================
 influences = []
 
+params = list(torch_model.parameters())
+
+# Precompute the full training loss closure
+def full_train_loss():
+    return compute_loss(torch_model, X_train_tensor, y_train_tensor)
+
 for test_idx in range(len(X_test)):
     # Get test point
-    x_test_tensor = X_test_tensor[test_idx:test_idx+1]
-    y_test_tensor = y_test_tensor[test_idx:test_idx+1]
+    x_test_single = X_test_tensor[test_idx:test_idx+1]
+    y_test_single = y_test_tensor[test_idx:test_idx+1]
 
     # Compute gradients for test point
-    params = list(torch_model.parameters())
-    test_loss = compute_loss(torch_model, x_test_tensor, y_test_tensor)
+    test_loss = compute_loss(torch_model, x_test_single, y_test_single)
     grad_test = compute_gradient(test_loss, params)
 
-    # Full training loss closure
-    def full_train_loss():
-        return compute_loss(torch_model, X_train_tensor, y_train_tensor)
-
-    # Compute influence for each training point
+    s_test = conjugate_gradient(full_train_loss, torch_model, params, grad_test, cg_iters=10)
+    
+    # Compute influence for each (subset of) training points
     for i in range(len(X_train)):
         xi = X_train_tensor[i:i+1]
         yi = y_train_tensor[i:i+1]
         loss_i = compute_loss(torch_model, xi, yi)
         grad_i = compute_gradient(loss_i, params)
-
-        # Solve H v = grad_i
-        v = conjugate_gradient(full_train_loss, torch_model, params, grad_i, cg_iters=10)
-
-        # Influence = - grad_test^T v
-        influence_i = -sum((gt * vv).sum().item() for gt, vv in zip(grad_test, v))
+        # Influence = - s_test^T grad_i
+        influence_i = -sum((ss * vv).sum().item() for ss, vv in zip(s_test, grad_i))
         influences.append({'test_idx': test_idx, 'unique_id': unique_ids[i], 'influence': influence_i})
-
+        print(i)
+ 
 # Save influences to CSV
-output_file = "Data-Poisoning/datasets/influence_scores.csv"
+output_file = "../datasets/temp/influence_scores.csv"
 influence_df = pd.DataFrame(influences)
 influence_df.to_csv(output_file, index=False)
 
